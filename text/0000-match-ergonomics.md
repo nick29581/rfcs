@@ -3,10 +3,14 @@
 - RFC PR: (leave this empty)
 - Rust Issue: (leave this empty)
 
+I'm writing comments inline (not making changes), hopefully they'll stand out in the diff.
+
 # Summary
 [summary]: #summary
 
 Better ergonomics for pattern-matching on references.
+
+AIUI, this will only apply to match and similar expressions, not pattern matching in general?
 
 Currently:
 
@@ -122,29 +126,39 @@ than using auto-deref and autoreferencing, however, this proposal introduces
 the idea of "reference inversion". Reference inversion would allow references
 to structures to be matched as though they were structures of references.
 
+I'm not sure if it is useful to cause this reference inversion - it seems a bit like jargon to me. "Default binding modes" (used in the intro) sounds better to me
+
 Example:
 
 ```rust
 match &Some(3) { // `&Option<i32>`
+it might be clearer to match a variable rather than an expression
   Some(a) => {
     // `&Some(3)` is matched as though it were `Some(&3)`.
+    I don't feel that the above comment is useful - it doesn't feel quite accurate
     // The value is dereferenced, and `a` is bound like `ref a`.
+    You could then use the variable name instead of "the value" here.
   }
   None => {}
 }
 ```
+
+I would try and give an intuition here (before getting into formalities) about when this change applies and roughly what it does
 
 ## Definitions
 
 A _non-reference pattern_ is a pattern that cannot currently match a reference.
 A non-reference pattern is any pattern that is not a binding, a wildcard (`_`),
 a value of a reference type, or a reference pattern (a pattern beginning with
+what is "a value of a reference type" - I don't understand a value in a pattern which doesn't match the next clause
 `&` or `&mut`).
 
  _Default binding mode_: this mode, either `move`, `ref`, or `ref mut`, is used
  to determine how to bind new pattern variables. When we see a variable binding
  not explicitly marked `ref`, `ref mut`, or `mut`, we use the _default binding
  mode_ to determine how it should be bound.
+
+It might be worth noting that the default binding mode for current match arms is always move, and that unless there is a reference pattern, that will continue to be the case
 
 ## Binding mode rules
 
@@ -156,6 +170,8 @@ update the default binding mode:
 2. If the reference encountered is `&mut T`: if the current
 binding mode is `&T`, it should remain `&T`. Otherwise, set the current binding
 mode to `&mut T`.
+
+I think the above could be clearer - not clear to me what "the reference" is or what the "current binding more" is. I think you need to specify what is being iterated over and how.
 
 ```
                         Start                                
@@ -185,7 +201,11 @@ underlying value.
 The above rules and the examples that follow are drawn from @nikomatsakis's
 [comment proposing this design](https://github.com/rust-lang/rfcs/pull/1944#issuecomment-296133645).
 
+Could you specifiy what happens if there is an explicit `ref`? Is it possible to opt out of this, e.g, by using `move` to cause a move binding?
+
 ## Examples
+
+for these examples, I think it would be useful to give the 'desugared' version
 
 ```rust
 match &3 {
@@ -204,6 +224,7 @@ match &Some(3) {
         // default binding mode to `ref`. `p` is read as `ref p` and given
         // type `&i32`.
     }
+    e.g., &Some(ref p) 
     x => {
         // In this arm, we are still in move-mode by default, so `x` has type
         // `&Option<i32>`
@@ -246,6 +267,7 @@ if let Some(x) = &Some(3) { ... }
 ## Backwards compatibility
 
 In order to guarantee backwards-compatibility, this proposal aims only modify
+typo: only to modify, but I would be more bold and drop "aims"
 pattern-matching a reference with a non-reference pattern, which is an error
 today.
 
@@ -254,6 +276,8 @@ which isn't always true for inference variables. If the type being matched may
 or may not be a reference, then we should default to assuming that it is not a
 reference, in which case the binding mode will default to `move` and it will
 behave exactly as it does today.
+
+Could you give an example of when this would happen
 
 # Drawbacks
 [drawbacks]: #drawbacks
