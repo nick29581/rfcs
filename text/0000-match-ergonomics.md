@@ -27,7 +27,7 @@ match x {
 ```
 
 This is accomplished through automatic dereferencing and the introduction of
-default binding modes. 
+default binding modes.
 
 # Motivation
 [motivation]: #motivation
@@ -118,42 +118,49 @@ and [Rustconf keynote](https://www.youtube.com/watch?v=pTQxHIzGqFI&list=PLE7tQUd
 
 This RFC is a refinement of
 [the match ergonomics RFC](https://github.com/rust-lang/rfcs/pull/1944). Rather
-than using auto-deref and autoreferencing, however, this proposal introduces
-the idea of "reference inversion". Reference inversion would allow references
-to structures to be matched as though they were structures of references.
+than using auto-deref and autoreferencing, however, this RFC introduces the
+ability to match a reference with a _non-reference pattern_ using _default
+binding modes_.
 
 Example:
 
 ```rust
-match &Some(3) { // `&Option<i32>`
+let x = Some(3);
+let y = &x;
+match y { // `&Option<i32>`
   Some(a) => {
-    // `&Some(3)` is matched as though it were `Some(&3)`.
-    // The value is dereferenced, and `a` is bound like `ref a`.
+    // `y` is dereferenced, and `a` is bound like `ref a`.
   }
   None => {}
 }
 ```
 
+The high-level idea is to auto-dereferenced variables during pattern-matching.
+When an auto-dereference occurs, we will automatically change the inner bindings
+to `ref` or `ref mut` bindings.
+
 ## Definitions
 
 A _non-reference pattern_ is a pattern that cannot currently match a reference.
 A non-reference pattern is any pattern that is not a binding, a wildcard (`_`),
-a value of a reference type, or a reference pattern (a pattern beginning with
+a constant of a reference type, or a reference pattern (a pattern beginning with
 `&` or `&mut`).
 
  _Default binding mode_: this mode, either `move`, `ref`, or `ref mut`, is used
  to determine how to bind new pattern variables. When we see a variable binding
  not explicitly marked `ref`, `ref mut`, or `mut`, we use the _default binding
- mode_ to determine how it should be bound.
+ mode_ to determine how it should be bound. Currently, the _default binding
+ mode_ is always `move`. This RFC proposes to change that.
 
 ## Binding mode rules
 
-The _default binding mode_ starts out as `move.` When matching a reference with
-a _non-reference pattern_, we will automatically dereference the value and
-update the default binding mode:
+The _default binding mode_ starts out as `move.` When matching a pattern, we
+start from the outside of the pattern and work inwards. Each time a reference is
+matched using a _non-reference pattern_, we will automatically dereference the
+value and update the default binding mode:
 
 1. If the reference encountered is `&T`, set the default binding mode to `ref`.
-2. If the reference encountered is `&mut T`: if the current
+2. If the reference encountered is `&mut T`: if the current default
 binding mode is `&T`, it should remain `&T`. Otherwise, set the current binding
 mode to `&mut T`.
 
@@ -182,17 +189,21 @@ Note that there is no exit from the `ref` binding mode. This is because an
 `&mut` inside of a `&` is still shared, and thus cannot be used to mutate the
 underlying value.
 
+Also note that no transitions are taken when using an explicit `ref` or
+`ref mut` binding. The _default binding mode_ only changes when matching a
+reference with a non-reference pattern.
+
 The above rules and the examples that follow are drawn from @nikomatsakis's
 [comment proposing this design](https://github.com/rust-lang/rfcs/pull/1944#issuecomment-296133645).
 
 ## Examples
 
 ```rust
-match &3 {
+match &Some(3) {
     p => {
         // p is a variable binding. Hence, this is **not** a ref-defaulting match,
         // and `p` is move mode (and has type `&i32`).
-    }
+    },
 }
 ```
 
@@ -203,11 +214,21 @@ match &Some(3) {
         // "non-reference pattern." We dereference the `&` and shift the
         // default binding mode to `ref`. `p` is read as `ref p` and given
         // type `&i32`.
-    }
+    },
     x => {
         // In this arm, we are still in move-mode by default, so `x` has type
         // `&Option<i32>`
-    }
+    },
+}
+
+// Desugared:
+match &Some(3) {
+  &Some(ref P) => {
+    ...
+  },
+  x => {
+    ...
+  },
 }
 ```
 
@@ -220,9 +241,16 @@ match (&Some(5), &Some(6)) {
         // In the second half of the tuple there's no non-reference pattern,
         // so `b` will be `i32` (bound with `move` mode). Moreover, `b` is
         // mutable.
-    }
-    (_, None) | (None, _) => ...,
-    (None, None) => ...,
+    },
+    _ => { ... }
+}
+
+// Desugared:
+match (&Some(5), &Some(6)) {
+  (&Some(ref a), &Some(mut b)) => {
+    ...
+  },
+  _  => { ... },
 }
 ```
 
@@ -230,8 +258,16 @@ match (&Some(5), &Some(6)) {
 match &mut x {
     Some(y) => {
         // `y` is an `&mut` reference here, equivalent to `ref mut` before
-    }
-    None => { ... }
+    },
+    None => { ... },
+}
+
+// Desugared:
+match &mut x {
+  &mut Some(ref mut y) => {
+    ...
+  },
+  &mut None => { ... },
 }
 ```
 
@@ -240,20 +276,47 @@ match &mut x {
 // whether it be in a `match` or a `let`. So, for example,
 // `x` here is a ref binding:
 if let Some(x) = &Some(3) { ... }
+
+// Desugared:
+if let &Some(ref x) = &Some(3) { ... }
 ```
 
 
 ## Backwards compatibility
 
-In order to guarantee backwards-compatibility, this proposal aims only modify
+In order to guarantee backwards-compatibility, this proposal only modifies
 pattern-matching a reference with a non-reference pattern, which is an error
 today.
 
 This reasoning requires that we know if the type being matched is a reference,
 which isn't always true for inference variables. If the type being matched may
-or may not be a reference, then we should default to assuming that it is not a
+or may not be a reference _and_ it is being matched by a _non-reference
+pattern_, then we should default to assuming that it is not a
 reference, in which case the binding mode will default to `move` and it will
 behave exactly as it does today.
+
+Example:
+
+```rust
+let x = vec![];
+
+match x[0] { // This will panic, but that doesn't matter for this example
+
+    // When matching here, we don't know whether `x[0]` is `Option<_>` or
+    // `&Option<_>`. `Some(y)` is a non-reference pattern, so we assume that
+    // `x[0]` is not a reference
+    Some(y) => {
+
+        // Since we know `Vec::contains` takes `&T`, `x` must be of type
+        // `Vec<Option<usize>>`. However, we couldn't have known that before
+        // analyzing the match body.
+        if x.contains(&Some(5)) {
+            ...
+        }
+    }
+    None => {}
+}
+```
 
 # Drawbacks
 [drawbacks]: #drawbacks
