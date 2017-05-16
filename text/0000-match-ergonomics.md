@@ -156,15 +156,15 @@ a constant of a reference type, or a reference pattern (a pattern beginning with
 
 ## Binding mode rules
 
-The _default binding mode_ starts out as `move.` When matching a pattern, the
+The _default binding mode_ starts out as `move`. When matching a pattern, the
 compiler starts from the outside of the pattern and works inwards.
 Each time a reference is matched using a _non-reference pattern_,
 it will automatically dereference the value and update the default binding mode:
 
 1. If the reference encountered is `&T`, set the default binding mode to `ref`.
 2. If the reference encountered is `&mut T`: if the current default
-binding mode is `&T`, it should remain `&T`. Otherwise, set the current binding
-mode to `&mut T`.
+binding mode is `ref`, it should remain `ref`. Otherwise, set the current binding
+mode to `ref mut T`.
 
 ```
                         Start                                
