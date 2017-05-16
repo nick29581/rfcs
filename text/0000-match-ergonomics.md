@@ -126,8 +126,8 @@ Example:
 
 ```rust
 let x = Some(3);
-let y = &x;
-match y { // `&Option<i32>`
+let y: &Option<i32> = &x;
+match y {
   Some(a) => {
     // `y` is dereferenced, and `a` is bound like `ref a`.
   }
@@ -135,9 +135,9 @@ match y { // `&Option<i32>`
 }
 ```
 
-The high-level idea is to auto-dereferenced variables during pattern-matching.
-When an auto-dereference occurs, we will automatically change the inner bindings
-to `ref` or `ref mut` bindings.
+The high-level idea is to auto-dereference variables during pattern-matching.
+When an auto-dereference occurs, the compiler will automatically tread the inner
+bindings as `ref` or `ref mut` bindings.
 
 ## Definitions
 
@@ -147,17 +147,19 @@ a constant of a reference type, or a reference pattern (a pattern beginning with
 `&` or `&mut`).
 
  _Default binding mode_: this mode, either `move`, `ref`, or `ref mut`, is used
- to determine how to bind new pattern variables. When we see a variable binding
- not explicitly marked `ref`, `ref mut`, or `mut`, we use the _default binding
- mode_ to determine how it should be bound. Currently, the _default binding
- mode_ is always `move`. This RFC proposes to change that.
+ to determine how to bind new pattern variables.
+ When the compiler sees a variable binding not explicitly marked
+ `ref`, `ref mut`, or `mut`, it uses the _default binding mode_
+ to determine how the variable should be bound.
+ Currently, the _default binding mode_ is always `move`.
+ This RFC proposes to change that.
 
 ## Binding mode rules
 
-The _default binding mode_ starts out as `move.` When matching a pattern, we
-start from the outside of the pattern and work inwards. Each time a reference is
-matched using a _non-reference pattern_, we will automatically dereference the
-value and update the default binding mode:
+The _default binding mode_ starts out as `move.` When matching a pattern, the
+compiler starts from the outside of the pattern and works inwards.
+Each time a reference is matched using a _non-reference pattern_,
+it will automatically dereference the value and update the default binding mode:
 
 1. If the reference encountered is `&T`, set the default binding mode to `ref`.
 2. If the reference encountered is `&mut T`: if the current default
@@ -198,6 +200,7 @@ The above rules and the examples that follow are drawn from @nikomatsakis's
 
 ## Examples
 
+No new behavior:
 ```rust
 match &Some(3) {
     p => {
@@ -207,6 +210,7 @@ match &Some(3) {
 }
 ```
 
+One match arm with new behavior:
 ```rust
 match &Some(3) {
     Some(p) => {
@@ -232,6 +236,7 @@ match &Some(3) {
 }
 ```
 
+Multiple nested patterns with new and old behavior, respectively:
 ```rust
 match (&Some(5), &Some(6)) {
     (Some(a), &Some(mut b)) => {
@@ -254,6 +259,25 @@ match (&Some(5), &Some(6)) {
 }
 ```
 
+Example with multiple dereferences:
+```rust
+let x = (1, &Some(5));
+let y = &Some(x);
+match y {
+  Some((a, Some(b))) => { ... }
+  _ => { ... }
+}
+
+// Desugared:
+let x = (1, &Some(5));
+let y = &Some(x);
+match y {
+  &Some((ref a, &Some(ref b))) => { ... }
+  _ => { ... }
+}
+```
+
+Example of new mutable reference behavior:
 ```rust
 match &mut x {
     Some(y) => {
@@ -271,6 +295,7 @@ match &mut x {
 }
 ```
 
+Example using `if let`:
 ```rust
 // Note that these rules apply to any match that occurs,
 // whether it be in a `match` or a `let`. So, for example,
@@ -288,10 +313,11 @@ In order to guarantee backwards-compatibility, this proposal only modifies
 pattern-matching a reference with a non-reference pattern, which is an error
 today.
 
-This reasoning requires that we know if the type being matched is a reference,
-which isn't always true for inference variables. If the type being matched may
+This reasoning requires that the compiler knows if the type being matched is a
+reference, which isn't always true for inference variables.
+If the type being matched may
 or may not be a reference _and_ it is being matched by a _non-reference
-pattern_, then we should default to assuming that it is not a
+pattern_, then the compiler will default to assuming that it is not a
 reference, in which case the binding mode will default to `move` and it will
 behave exactly as it does today.
 
@@ -328,10 +354,14 @@ experience more straightforward and requiring fewer manual reference-gymnastics.
 # Alternatives
 [alternatives]: #alternatives
 
-* We could support auto-ref / deref as suggested in
+- We could support auto-ref / deref as suggested in
 [the original match ergonomics RFC.](https://github.com/rust-lang/rfcs/pull/1944)
 - We could analyze the binding site and try to pick the best default based on
 context.
+- We could allow writing `move` in patterns to override the default binding mode
+and move the value. However, moving a value out from behind a shared or mutable
+reference is only possible for `Copy` types, so this would not be particularly
+useful in practice, and would add unnecessary complexity to the language.
 
 Both of these approaches have troublesome interaction with
 backwards-compatibility, and it becomes more difficult for the user to reason
