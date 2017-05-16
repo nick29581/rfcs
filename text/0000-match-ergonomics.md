@@ -136,7 +136,7 @@ match y {
 ```
 
 The high-level idea is to auto-dereference variables during pattern-matching.
-When an auto-dereference occurs, the compiler will automatically tread the inner
+When an auto-dereference occurs, the compiler will automatically treat the inner
 bindings as `ref` or `ref mut` bindings.
 
 ## Definitions
@@ -233,6 +233,23 @@ match &Some(3) {
   x => {
     ...
   },
+}
+```
+
+`|`'d match:
+```rust
+let x = &Some((3, 3));
+match x {
+  // Here, each of the patterns are treated independently
+  Some((x, 3)) | &Some((ref x, 5)) => { ... }
+  _ => { ... }
+}
+
+// Desugared:
+let x = &Some(3);
+match x {
+  &Some((ref x, 3)) | &Some((ref x, 5)) => { ... }
+  None => { ... }
 }
 ```
 
@@ -358,8 +375,11 @@ experience more straightforward and requiring fewer manual reference-gymnastics.
 [the original match ergonomics RFC.](https://github.com/rust-lang/rfcs/pull/1944)
 - We could analyze the binding site and try to pick the best default based on
 context.
-- We could allow writing `move` in patterns to override the default binding mode
-and move the value. However, moving a value out from behind a shared or mutable
+- We could allow writing `move` in patterns.
+Without this, `move`, unlike `ref` and `ref mut`, would always be implicit,
+leaving no way override a default binding mode of `ref` or `ref mut` and move
+the value out from behind a reference.
+However, moving a value out from behind a shared or mutable
 reference is only possible for `Copy` types, so this would not be particularly
 useful in practice, and would add unnecessary complexity to the language.
 
