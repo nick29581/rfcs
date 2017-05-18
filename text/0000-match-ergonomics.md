@@ -118,9 +118,12 @@ and [Rustconf keynote](https://www.youtube.com/watch?v=pTQxHIzGqFI&list=PLE7tQUd
 
 This RFC is a refinement of
 [the match ergonomics RFC](https://github.com/rust-lang/rfcs/pull/1944). Rather
-than using auto-deref and autoreferencing, however, this RFC introduces the
-ability to match a reference with a _non-reference pattern_ using _default
-binding modes_.
+than using auto-deref and auto-referencing, this RFC introduces _default binding
+modes_ used when a reference value is matched by a non-reference pattern
+
+In other words, we allow auto-dereferencing values during pattern-matching.
+When an auto-dereference occurs, the compiler will automatically treat the inner
+bindings as `ref` or `ref mut` bindings.
 
 Example:
 
@@ -135,18 +138,14 @@ match y {
 }
 ```
 
-The high-level idea is to auto-dereference variables during pattern-matching.
-When an auto-dereference occurs, the compiler will automatically treat the inner
-bindings as `ref` or `ref mut` bindings.
 
 ## Definitions
 
-A _non-reference pattern_ is a pattern that cannot currently match a reference.
-A non-reference pattern is any pattern that is not a binding, a wildcard (`_`),
-a constant of a reference type, or a reference pattern (a pattern beginning with
+A _non-reference pattern_ is any pattern that is not a binding, a wildcard (`_`),
+a constant with reference type, or a reference pattern (a pattern beginning with
 `&` or `&mut`).
 
- _Default binding mode_: this mode, either `move`, `ref`, or `ref mut`, is used
+ _Default binding mode_: either `move`, `ref`, or `ref mut`, is used
  to determine how to bind new pattern variables.
  When the compiler sees a variable binding not explicitly marked
  `ref`, `ref mut`, or `mut`, it uses the _default binding mode_
@@ -161,8 +160,8 @@ compiler starts from the outside of the pattern and works inwards.
 Each time a reference is matched using a _non-reference pattern_,
 it will automatically dereference the value and update the default binding mode:
 
-1. If the reference encountered is `&T`, set the default binding mode to `ref`.
-2. If the reference encountered is `&mut T`: if the current default
+1. If the reference encountered is `&Pat`, set the default binding mode to `ref`.
+2. If the reference encountered is `&mut Pat`: if the current default
 binding mode is `ref`, it should remain `ref`. Otherwise, set the current binding
 mode to `ref mut T`.
 
@@ -176,7 +175,7 @@ mode to `ref mut T`.
                 +-----------------------+                     
                /                        \                     
 Encountered   /                          \  Encountered       
-  &mut T     /                            \     &T            
+  &mut Pat   /                            \     &Pat
             v                              v                  
 +-----------------------+        +-----------------------+    
 | Default Binding Mode: |        | Default Binding Mode: |    
@@ -184,7 +183,7 @@ Encountered   /                          \  Encountered
 +-----------------------+        +-----------------------+    
                           ----->                              
                         Encountered                           
-                            &T                                
+                            &Pat                              
 ```
 
 Note that there is no exit from the `ref` binding mode. This is because an
@@ -312,23 +311,23 @@ match &mut x {
 }
 ```
 
-Example using `if let`:
+Example using `let`:
 ```rust
-// Note that these rules apply to any match that occurs,
+// Note that these rules apply to any pattern matching
 // whether it be in a `match` or a `let`. So, for example,
 // `x` here is a ref binding:
-if let Some(x) = &Some(3) { ... }
+let Foo(x) = &Foo(3);
 
 // Desugared:
-if let &Some(ref x) = &Some(3) { ... }
+let &Foo(ref x) = &Foo(3);
 ```
 
 
 ## Backwards compatibility
 
 In order to guarantee backwards-compatibility, this proposal only modifies
-pattern-matching a reference with a non-reference pattern, which is an error
-today.
+pattern-matching when a reference is matched with a non-reference pattern,
+which is an error today.
 
 This reasoning requires that the compiler knows if the type being matched is a
 reference, which isn't always true for inference variables.
@@ -366,15 +365,13 @@ match x[0] { // This will panic, but that doesn't matter for this example
 
 The major downside of this proposal is that it complicates the pattern-matching
 logic. However, doing so allows common cases to "just work", making the beginner
-experience more straightforward and requiring fewer manual reference-gymnastics.
+experience more straightforward and requiring fewer manual reference gymnastics.
 
 # Alternatives
 [alternatives]: #alternatives
 
 - We could support auto-ref / deref as suggested in
 [the original match ergonomics RFC.](https://github.com/rust-lang/rfcs/pull/1944)
-- We could analyze the binding site and try to pick the best default based on
-context.
 - We could allow writing `move` in patterns.
 Without this, `move`, unlike `ref` and `ref mut`, would always be implicit,
 leaving no way override a default binding mode of `ref` or `ref mut` and move
